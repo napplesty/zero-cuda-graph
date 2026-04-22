@@ -87,6 +87,10 @@ static py::dict py_get_memory_stats(int device) {
   result["total_physical_cached"] = ds.pmm->totalPhysicalCached();
   result["threshold"] = alloc->threshold();
 
+  // Purge stats
+  result["purge_count"]       = ds.pmm->purgeCount();
+  result["total_purged_bytes"] = ds.pmm->totalPurgedBytes();
+
   // OOM counters
   result["num_alloc_retries"] = ds.num_alloc_retries.load();
   result["num_ooms"]          = ds.num_ooms.load();

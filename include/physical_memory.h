@@ -35,7 +35,13 @@ class PhysicalMemoryManager {
   void          freeLargeBlock(PhysicalBlock blk);
 
   // ---- housekeeping --------------------------------------------
-  /// Release all *unused* blocks back to the driver.
+  /// Release *enough* cached blocks to free at least @p min_bytes of
+  /// physical memory.  Blocks are released largest-first to minimise
+  /// the number of cuMemRelease driver calls.
+  /// @return the actual number of bytes released (may be > min_bytes).
+  size_t purge(size_t min_bytes);
+
+  /// Release **all** unused blocks back to the driver (emergency path).
   void trim();
 
   // ---- statistics ----------------------------------------------
@@ -45,6 +51,11 @@ class PhysicalMemoryManager {
   size_t largePoolCached()        const;
   size_t smallPoolInUse()         const;
   size_t largePoolInUse()         const;
+
+  /// Number of times purge() has been invoked.
+  size_t purgeCount()             const;
+  /// Total bytes released by purge() calls (lifetime).
+  size_t totalPurgedBytes()       const;
 
  private:
   int device_;
@@ -63,6 +74,10 @@ class PhysicalMemoryManager {
   size_t small_cached_bytes_ = 0;
   size_t large_in_use_bytes_ = 0;
   size_t large_cached_bytes_ = 0;
+
+  // Purge accounting
+  size_t purge_count_        = 0;
+  size_t total_purged_bytes_ = 0;
 
   // Internal helpers
   PhysicalBlock createBlock(size_t size);

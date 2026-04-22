@@ -22,6 +22,8 @@ def memory_stats(device: int = 0) -> dict[str, Any]:
     - ``total_physical``  – total physical bytes held (in-use + cached).
     - ``total_physical_cached`` – physical bytes sitting idle in free lists.
     - ``threshold`` – current routing threshold in bytes.
+    - ``purge_count`` – number of selective purge operations.
+    - ``total_purged_bytes`` – total bytes released by selective purge.
     - ``num_alloc_retries`` – number of OOM-retry attempts.
     - ``num_ooms`` – number of unrecoverable OOM events.
     """
@@ -95,6 +97,8 @@ def memory_summary(device: int = 0) -> str:
         f"Total allocated:        {_fmt(stats['total_allocated'])}",
         f"Total physical held:    {_fmt(stats['total_physical'])}",
         f"Total physical cached:  {_fmt(stats['total_physical_cached'])}",
+        f"Purge count:            {stats['purge_count']}",
+        f"Total purged:           {_fmt(stats['total_purged_bytes'])}",
         f"OOM retries:            {stats['num_alloc_retries']}",
         f"OOM failures:           {stats['num_ooms']}",
         "",

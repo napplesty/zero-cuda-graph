@@ -93,6 +93,69 @@ void PhysicalMemoryManager::freeLargeBlock(PhysicalBlock blk) {
 }
 
 // ============================================================
+// Purge – release *enough* cached blocks (largest first)
+// ============================================================
+
+size_t PhysicalMemoryManager::purge(size_t min_bytes) {
+  if (min_bytes == 0) return 0;
+
+  // Phase 1: collect blocks to release under the lock.
+  std::vector<PhysicalBlock> to_destroy;
+
+  size_t freed = 0;
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+
+    // 1a. Release large blocks, largest size class first.
+    for (auto it = large_free_.rbegin();
+         it != large_free_.rend() && freed < min_bytes; ) {
+      auto& pool = it->second;
+      while (!pool.empty() && freed < min_bytes) {
+        auto blk = pool.back();
+        pool.pop_back();
+        large_cached_bytes_ -= blk.size;
+        freed += blk.size;
+        to_destroy.push_back(blk);
+      }
+      ++it;
+    }
+
+    // Remove empty buckets.
+    for (auto it = large_free_.begin(); it != large_free_.end(); ) {
+      if (it->second.empty()) {
+        it = large_free_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+
+    // 1b. If still not enough, release small blocks.
+    while (!small_free_.empty() && freed < min_bytes) {
+      auto blk = small_free_.back();
+      small_free_.pop_back();
+      small_cached_bytes_ -= blk.size;
+      freed += blk.size;
+      to_destroy.push_back(blk);
+    }
+
+    // Only count effective purges (where something was actually freed).
+    if (freed > 0) {
+      purge_count_++;
+      total_purged_bytes_ += freed;
+    }
+  }
+
+  // Phase 2: actually release blocks OUTSIDE the lock so that
+  // concurrent alloc/free operations are not blocked during the
+  // (potentially slow) cuMemRelease driver calls.
+  for (auto& blk : to_destroy) {
+    destroyBlock(blk);
+  }
+
+  return freed;
+}
+
+// ============================================================
 // Trim – release *all* cached blocks
 // ============================================================
 
@@ -146,6 +209,16 @@ size_t PhysicalMemoryManager::smallPoolInUse() const {
 size_t PhysicalMemoryManager::largePoolInUse() const {
   std::lock_guard<std::mutex> lk(mu_);
   return large_in_use_bytes_;
+}
+
+size_t PhysicalMemoryManager::purgeCount() const {
+  std::lock_guard<std::mutex> lk(mu_);
+  return purge_count_;
+}
+
+size_t PhysicalMemoryManager::totalPurgedBytes() const {
+  std::lock_guard<std::mutex> lk(mu_);
+  return total_purged_bytes_;
 }
 
 // ============================================================

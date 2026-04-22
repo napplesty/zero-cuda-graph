@@ -222,12 +222,14 @@ void* VMMAllocator::alloc_impl(size_t size, cudaStream_t stream) {
       ptr = ds.small_alloc->allocate(size, stream);
     }
   } catch (const std::exception&) {
-    // ---- OOM retry: trim caches and try once more ----------------
+    // ---- OOM retry level 1: selective purge ----------------------
+    // Reclaim deferred frees, flush sub-allocator caches, then
+    // release only enough physical blocks to satisfy this request.
     ds.num_alloc_retries.fetch_add(1, std::memory_order_relaxed);
     forceProcessPendingFrees(dev);
     ds.small_alloc->emptyCache();
     ds.large_alloc->emptyCache();
-    ds.pmm->trim();
+    ds.pmm->purge(size);
 
     try {
       if (is_large) {
@@ -235,9 +237,27 @@ void* VMMAllocator::alloc_impl(size_t size, cudaStream_t stream) {
       } else {
         ptr = ds.small_alloc->allocate(size, stream);
       }
-    } catch (...) {
-      ds.num_ooms.fetch_add(1, std::memory_order_relaxed);
-      throw;
+    } catch (const std::exception&) {
+      // ---- OOM retry level 2: full trim (last resort) -----------
+      // The selective purge was not enough – flush again (new
+      // deferred frees may have arrived from other threads) and
+      // release everything.
+      ds.num_alloc_retries.fetch_add(1, std::memory_order_relaxed);
+      forceProcessPendingFrees(dev);
+      ds.small_alloc->emptyCache();
+      ds.large_alloc->emptyCache();
+      ds.pmm->trim();
+
+      try {
+        if (is_large) {
+          ptr = ds.large_alloc->allocate(size, stream);
+        } else {
+          ptr = ds.small_alloc->allocate(size, stream);
+        }
+      } catch (...) {
+        ds.num_ooms.fetch_add(1, std::memory_order_relaxed);
+        throw;
+      }
     }
   }
 
